@@ -1,0 +1,601 @@
+---
+title: "PS5"
+author: "Hanyu Wang"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+The dataset ‘problemset5.RData’ (in the Problem Sets folder under Resources) contains data on positive laboratory tests for rotavirus (“rotaCA”)* reported weekly to the National Respiratory and Enteric Viral Surveillance System (NREVSSLinks to an external site.) from the state of California for July 1991 to June 2006 (“time”).  The rotavirus season in the northern hemisphere is typically considered to start in July and end in June; the vector “week” gives the week of the season (from 1 to 52) for the entire period of observation. Rotavirus vaccine was introduced in the US in 2006 with doses administered to infants at 2, 4, and 6 months of age.
+
+*Note: This is not the “real” data from NREVSS (due to data sharing restrictions), but it is consistent with the actual data.
+
+```{r, include=FALSE}
+library(tidyverse)
+```
+
+
+```{r}
+load("/Users/macbook/Desktop/problemset5.RData")
+rota <- as.data.frame(problemset5)
+```
+
+```{r}
+length(rota$rotaCA) # 780 weeks
+length(rota$rotaCA)/52 # == 15 years
+```
+
+
+
+# 1. What is (or are) the dominant period(s) of oscillation in the rotavirus time series? Is there any evidence that it changes over time?  Show how you determined this.
+ 
+### i. Plot the number of rotavirus against "time".
+
+```{r}
+rota %>% 
+  ggplot(aes(x = time, y = rotaCA)) +
+  geom_line(linewidth = 1.2, color = "#3D7BE3") +
+  scale_x_continuous(
+    breaks = seq(min(rota$time), max(rota$time), by = 1)
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    plot.title = element_text(
+      family = "Helvetica",
+      face = "bold",
+      size = 22,
+      hjust = 0
+    ),
+    plot.subtitle = element_text(
+      family = "Helvetica",
+      size = 15,
+      color = "gray30",
+      hjust = 0
+    ),
+    plot.caption = element_text(
+      family = "Helvetica",
+      size = 10,
+      color = "gray40",
+      hjust = 1
+    ),
+    axis.text = element_text(
+      family = "Helvetica",
+      size = 13,
+      color = "gray30"
+    ),
+    axis.title = element_text(
+      family = "Helvetica",
+      size = 13,
+      color = "gray35"
+    ),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(color = "gray90", linewidth = 0.4),
+
+    plot.margin = margin(25, 25, 25, 25)
+  ) +
+  labs(
+    title = "Rotavirus Cases in California Over Time",
+    subtitle = "Reported Rotavirus notifications, July 1991 to June 2006",
+    x = "Year",
+    y = "Rotavirus cases"
+  )
+```
+
+### ii. Create a new variable "logrota" equal to the log of the number of bi-weekly rotavirus cases to make the time series more sinusoidal.
+
+```{r}
+# log of the number of bi-weekly measles cases
+rota$logrota <- log(rota$rotaCA) 
+
+# We check our data to see if we would run into this issue
+range(rota$rotaCA) # Thankfully, we don't have zeroes
+
+# log of the number of bi-weekly rotavirus cases
+rota %>% ggplot(aes(x = time, y = logrota))+
+  geom_line(color = "skyblue")+
+  theme_minimal()+ 
+  labs(y = "Rotavirus cases (in log scale)", x = "Year", 
+       title = "Rotavirus cases (in log scale)")
+```
+ 
+### iii. Calculate and plot the absolute value of the power from the Fast Fourier Transform (FFT) for the log-transformed time series vs the period of oscillations (in # years). 
+
+***Note***: dt = 1/52 which reflects weekly notifications (i.e., 52 weekly notifications in a year)
+
+```{r}
+# tmax: Number of biweeks
+tmax <- length(rota$rotaCA)
+
+# dt: time step in years
+dt <- 1/52
+
+# Calculate the absolute value of the power from FFT using a function fft()
+ym <- abs(fft(rota$logrota))
+
+# Frequency of oscillations (in weeks)
+f <- (0:(tmax-1))/tmax 
+
+# Period of oscillations (in years) = 1 / frequency
+t <- dt/f 
+
+# Make a plot
+plot(x=t[2:round(tmax/2)+1], 
+     y=ym[2:round(tmax/2)+1], 
+     type='h', xlim=c(0,12), 
+     ylim=c(0,300), bty="l",
+     xlab='Period (years)', ylab='Strength', 
+     main="Absolute value of the power from FFT")
+```
+
+*Answer*
+
+The dominant periods of oscillation in the rotavirus time series are 1 year and 6 months -- the two most prominent peaks are one for a year and the other for half a year. 
+
+There is no evidence that it changes over time –- the peak values remain stable around 1 year and 6 months with slight variations.
+
+
+
+# 2. Fit a simple linear regression model with sine and cosine terms to account for the cycle(s) identified above to the log-transformed rotavirus time series.
+
+```{r}
+# Create harmonic terms as follows:
+
+# 6-month periods
+cos6 <- cos( 4 * pi * rota$time)      # same as cos( 2* pi * time/0.5)
+sin6 <- sin( 4 * pi * rota$time)      # same as sin( 2* pi * time/0.5)
+
+# 12-month periods
+cos12 <- cos( 2 * pi * rota$time ) # same as cos( 2* pi * time/1)
+sin12 <- sin( 2 * pi * rota$time ) # same as sin( 2* pi * time/1)
+
+# Plot harmonic terms (sin)
+rota %>% ggplot(aes(x = time))+
+  geom_line(aes(y = sin6),color = "blue")+
+  geom_line(aes(y = sin12), color = "red")+
+  geom_hline(yintercept=c(-1,0,1), linetype="dashed", 
+                color = "grey")+
+  theme_classic()+
+  labs(x='Year',y='Value of sin terms')
+
+# Fit harmonic regression
+mod6 <- glm(rota$logrota ~ cos6+sin6 + rota$time)
+AIC(mod6)
+mod12 <- glm(rota$logrota ~ cos12+sin12 + rota$time)
+AIC(mod12)
+mod <- glm(rota$logrota ~ cos6 + sin6 + cos12 + sin12 + rota$time)
+AIC(mod)
+
+summary(mod)
+
+# We can also calculate the predicted number of weekly measles cases as follows:
+head(mod$fitted, 10)
+plot(rota$time,rota$logrota,type='l')
+lines(rota$time,mod$fitted,type='l',col='green')
+```
+
+## (a) What is the amplitude and timing (phase shift/offset) of the seasonal cycle?
+
+```{r}
+beta_sin6<-coef(mod)['sin6']
+beta_cos6<-coef(mod)['cos6']
+beta_sin12<-coef(mod)['sin12']
+beta_cos12<-coef(mod)['cos12']
+
+
+##### 6-month period #####
+
+# Amplitude
+amp6   <- sqrt(beta_sin6^2 +beta_cos6^2)
+print(paste0("6-month period amplitude :", round(amp6,3)))
+# Phase angle
+phase6 <- -atan(beta_sin6/beta_cos6)
+print(paste0("6-month period phase angle :",round(phase6,3)))
+
+##### 12-month period #####
+
+# Amplitude
+amp12   <- sqrt(beta_sin12^2 + beta_cos12^2)
+print(paste0("1-year period amplitude :", round(amp12,3)))
+# Phase angle
+phase12 <- -atan(beta_sin12/beta_cos12)
+print(paste0("1-year period phase angle :", round(phase12,3)))
+```
+
+
+
+## (b) Does the model provide an adequate fit to the time series?  Why or why not?
+
+```{r, warning=FALSE}
+# color setting 
+colors <- c("Observed" = "#00468BFF", "Predicted" = "#ED0000FF") # legend
+```
+
+### i. Plot this in the log scale
+
+```{r, warning=FALSE}
+# ...and plot the prediction with the observed data.
+# In log scale:
+# Plot harmonic terms (sin)
+rota %>% ggplot(aes(x = time))+
+  geom_line(aes(y = mod$fitted, color = "Predicted"))+
+  ylim(range(c(mod$fitted, rota$logrota)))+
+  geom_line(aes(y = rota$logrota, color ="Observed"))+
+  theme_classic()+ 
+  labs(y = "Log(rotavirus notifications)", x = "Year", 
+       title = "Observed vs. predicted number of log(rotavirus cases)",
+       color= "Legend")+
+    scale_color_manual(values = colors)+
+  theme(plot.title = element_text(face = "bold"))
+```
+
+### ii. Plot this in original y-scale. We are exponentiating the fitted values since the harmonic regression used log scale values `logrota`.
+
+```{r, warning=FALSE}
+## In original scale:
+rota %>% ggplot(aes(x = time))+
+  geom_line(aes(y = exp(mod$fitted), color = "Predicted"))+
+  ylim(range(c(exp(mod$fitted), rota$rotaCA)))+
+  geom_line(aes(y = rotaCA, color ="Observed"))+
+  theme_classic()+ 
+  labs(y = "Log(rotavirus notifications)", x = "Year", 
+       title = "Observed vs. predicted number of rotavirus cases",
+       color= "Legend")+
+  scale_color_manual(values = colors)+
+  theme(plot.title = element_text(face = "bold"))
+```
+
+*Answer*:
+
+The model does not provide an adequate fit to the time series -- although the periods and peak times of the red prediction line and the blue observation line are basically the same, the amplitude of the prediction curve is much smaller than that of the actual data.
+
+
+
+# 3. Calculate and plot the autocorrelation function (ACF) and partial autocorrelation function (PACF) for the log-transformed data. What terms (and associated lags) should you include in an ARIMA model?  Explain your answer.
+ 
+```{r}
+# Calculate and plot the autocorrelation (ACF) and  
+# the partial autocorrelation functions (PACF)
+par(mfrow=c(1,2))
+acf(rota$logrota, lag.max=52, main='ACF', xlab="Lag (in week)")
+pacf(rota$logrota, lag.max=52, main='PACF', xlab="Lag (in week)")
+```
+
+```{r}
+par(mfrow=c(2,2))
+acf(rota$logrota, lag.max=52*1, main='ACF (1 year trend)', 
+    xlab="Lag (in week)")
+pacf(rota$logrota, lag.max=52*1, main='PACF (1 year trend)', 
+     xlab="Lag (in week)")
+
+acf(rota$logrota, lag.max=52*15, main='ACF (15 year trend)', 
+    xlab="Lag (in week)")
+pacf(rota$logrota, lag.max=52*15, main='PACF (15 year trend)', 
+     xlab="Lag (in week)")
+```
+
+```{r}
+# Optional: Various outputs are included in "acf"
+acf <- acf(rota$logrota)
+pacf <- pacf(rota$logrota)
+names(acf)
+names(pacf)
+```
+
+*Answer*:
+
+p AR terms should be included -- ACF tails off gradually, while PACF cuts off after p lags.
+
+The associated lags could be 2 (p=2) -- PACF seems to cut off after 2 lags.
+ 
+
+# 4. Fit the ARIMA model you describe in question 3 to the first 10 years of the log-transformed rotavirus time series and use it to predict the last 5 years of data. Does the model provide a good fit to the data?  Explain your answer.
+
+```{r}
+# Using mod
+# (This for loop may take long time to run.)
+pred <- se <- c()
+for (i in 1:(5*52)){ 
+  # Fit the ARIMA model to the first 10 years of measles notifications
+  mod <- arima(rota$logrota[1:(52*10+(i-1))],order=c(2,0,0))
+  # NOTE: the default method ML will give you an error unfortunately.
+  #       we cannot use it for our analysis. 
+  
+  # Predict the last 5 years of the data using the fitted model
+  # (One-step forward prediction)
+  predicted_mod <-predict(mod, n.ahead=1)
+  pred[i] <- predicted_mod$pred # Point estimate
+  se[i] <- predicted_mod$se # Standard error
+  # print(i)
+}
+
+# Plot the observed vs. predicted number of cases
+par(mfrow=c(1,1))
+# Observed number of cases for the first 16 years
+plot(x=rota$time[1:length(rota$time)],
+     y=c(rota$logrota[1:(52*10)],rep(NA,5*52)),
+     type='l',col='blue',
+     ylab='Log(cases)',
+     xlab='Year',main="Observed vs. predicted number of cases (mod)",
+     lwd=2,ylim=range(c(pred-1.96*se,pred+1.96*se,rota$logrota)))
+
+# Predicted number of cases (with 95% CI) for the last 5 years
+lines(x=rota$time[(10*52+1):length(rota$time)], y=pred, col='red',lwd=2)
+lines(x=rota$time[(10*52+1):length(rota$time)], y=pred+1.96*se, lwd=0.5, col='red')
+lines(x=rota$time[(10*52+1):length(rota$time)], y=pred-1.96*se, lwd=0.5, col='red')
+
+# Observed number of cases for the last 5 years
+lines(x=rota$time[(10*52+1):length(rota$time)], y=rota$logrota[(52*10+1):(520+5*52)], col='blue')
+legend(x="topleft",legend=c("Observed","Predicted"),col=c("blue","red"),lty=c(1,1),bty="n")
+```
+
+*Answer*:
+
+Overall, the model provide a good fit to the data. 
+
+However, the predicted amplitude is smaller than the actual data. And the 95% CI is wide, indicating the uncertainty in the prediction.
+
+
+
+# 5. (a) What are some of the pitfalls in using models to make predictions or forecasts of incidence in the future? Name at least two.
+ 
+```{r}
+# Plot model residuals
+par(mfrow=c(1,1))
+plot(mod$residuals, type='l', col="blue", main="Model residuals", 
+     xlab="Time (in week)",ylab="Residuals")
+abline(h=0, col="red")
+abline(v=seq(52,52*20,by=52),col='black',lty=2) # some seasonality, period of 52
+```
+
+```{r}
+acf(mod$residuals,main='ACF (residuals)',lag.max=6*52)
+abline(v=c(52,52*2,52*3,52*4), col="red", lty=2, lwd=0.3)
+pacf(mod$residuals,main='PACF (residuals)',lag.max=6*52)
+abline(v=c(52,52*2,52*3,52*4), col="red", lty=2, lwd=0.3)
+```
+
+*Answer*:
+
+There are some seasonality. 
+
+Bars exceed/about to exceed the threshold in Week 52, 104, .... (yearly cycle).
+
+
+
+# 5. (b) How do ARIMA models and TSIR models differ in their approach to making predictions/forecasts?
+
+ARIMA models are fairly agnostic about the reasons behind the autocorrelation, trends, and “random shocks” present in the data
+
+TSIR models explicitly attempt to attribute these to the infection process (i.e. interaction between susceptible and infectious individuals)
+
+ 
+
+# ️6. Assuming rotavirus has a generation interval of approximately 1 week and can be treated like an immunizing infection (and therefore can be modeled with a simple TSIR model), what is the reporting fraction, $\rho$, for rotavirus-positive laboratory tests from California? Why might this be such a small number?
+ 
+```{r}
+cumreg <- lm(cumsum(rota$B) ~ cumsum(rota$rotaCA))
+summary(cumreg)
+```
+
+```{r}
+plot(x=cumsum(rota$rotaCA),y=cumsum(rota$B),
+     type='l',col='black',
+     xlab='Cumulative reported cases, sum(Yt)',
+     ylab='Cumulative births, sum(Bt)')
+lines(x=cumsum(rota$rotaCA),y=cumreg$fitted.values,col='black')
+lines(cumsum(rota$rotaCA), cumsum(rota$rotaCA),col="red") # <-- One-to-one line
+```
+
+```{r}
+# Under-reporting factor:
+summary(cumreg)
+coef(cumreg)[2] # This is 1/rho, so...
+ur <- 1/coef(cumreg)[2] # this is rho ! :) 
+ur # 0.0011
+
+# True number of measles cases through time:
+Ic <- (1/ur)*rota$rotaCA
+head(Ic)
+
+
+# PLOT: Reported (Yt) vs. true number of cases (It)
+plot(Ic, type='l', col="red", ylab="Number of rotavirus cases", 
+     xlab="Time (in week)",main="Reported vs. true number of cases")
+lines(rota$rotaCA,col="blue") # This is reported cases
+legend(x="topleft",legend=c("Reported","True"),
+       col=c("blue","red"),
+       lty=c(1,1),bty="n")
+```
+
+*Answer*:
+
+The reporting fraction, $\rho$, is about 0.0011.
+
+It is a small number because --
+
+   i. only a small number of cases are reported to the National Respiratory and Enteric Viral Surveillance System.
+
+  ii. the assumption that "rotavirus can be treated like an immunizing infection" does not hold (the immunity against rotavirus may decline over time). TSIR approach assumes infection is SIR, while rotavirus is best modeled by an SEIRS or SIRS model. Applying the TSIR susceptible reconstruction exaggerates the discrepancy between cumulative births and cumulative reported cases, producing a small estimate of the reporting fraction.
+
+
+
+# ️7. Estimate and plot $\beta_u$ for each of the 52 weeks of the rotavirus season.  (HINT: The population size of California in 2000 was 34 million.  Your estimate of $S_mean$ for the TSIR model will be between 1% and 50% of the total population.)
+
+```{r}
+# This is just the residual, so...
+D <- cumreg$residuals
+```
+
+```{r}
+# Create a new matrix "seas" with diag == 1 and else is 0. 
+# (This is to estimate j = 52 values of beta, rather than 546 beta's)
+
+tf <- length(rota$B) # 780 (52 weeks x 15 years)
+seas <- matrix(NA,779,52)
+
+for (i in 1:(tf-1)) {
+  for (j in 1:52){
+    seas[i,j] = ifelse((rota$week[i])==j,1,0)
+  }}
+seas[1:10,1:10] # Big matrix with diag == 1 and else is 0
+seas[,1] # 1 in every 52 entries. Week 1 in each year will have the same value of beta
+seas[,2]
+```
+
+```{r}
+# Create lInew and lIold
+lInew <- log(as.vector(Ic)[2:tf])
+lIold <- log(as.vector(Ic)[1:(tf-1)])
+head(cbind(lIold,lInew)) # 5.928401 prevalent cases transmitted to 6.337563 new cases at time 1
+
+# Create Dold
+Dold <- as.vector(D)[1:(tf-1)]
+
+# Approximate size of london population
+N <- 3300000 
+
+# We don't know how many of 3,300,000 were susceptible. Thus we have to consider 
+# various possibilities.
+# Plausible values of S_mean is between 5-25% of the population size, so:
+S_mean <- seq(0.05,0.25,0.001)*N 
+
+# Create an empty vector to store log-likelihoods
+llik <- rep(0,length(S_mean))
+
+for (i in 1:length(S_mean)){
+  # Calculate lSold 
+  lSold <- log(S_mean[i] + Dold) # S_t = S_mean + D_t (Slide 40)
+  # Calculate the log likelihood for each value of S_mean by fitting a bunch of
+  # linear regression models for different values of S_mean
+  llik[i] <- logLik(glm(lInew ~ lIold + seas, offset = lSold))[1] 
+}
+
+# Let's take a look at the plot of likelihood
+plot(x=S_mean,y=llik,main="Log-likelihood for different values of S_mean")
+
+# The best fit is...
+xi <- which.max(llik) # Returns index of the maximum log-likelihood estimate
+Smean_estim <- S_mean[xi] # Smean value for the best-fit model
+Smean_estim/N # About 10% of the population was susceptible to measles on average
+abline(h=max(llik),col="red")
+abline(v=Smean_estim,col="red")
+
+# S_t for the best-fit model
+lSold <- log(Smean_estim + Dold) 
+
+# Create the best-fitted model
+bestmodfit <- glm(lInew ~ lIold + seas, offset = lSold) 
+
+# PLOT
+plot(x = rota$time, y = (Ic), type='l',col='blue',
+     ylim = c(0, max(exp(bestmodfit$fitted.values))),
+     xlab='Year', ylab='Cases')
+lines(x=rota$time[2:tf], 
+      y=exp(bestmodfit$fitted.values), # Need to take exp because everything is in the log scale
+      col='red') 
+legend(x="topleft",legend=c("Observed","Predicted"),col=c("blue","red"),lty=c(1,1),bty="n")
+``` 
+```{r}
+coef(bestmodfit)
+```
+
+
+
+```{r}
+coef(bestmodfit) # estimated beta's are stored in 3 - 54
+
+# Plot the values of beta_u vs week
+plot(x=1:52, y=exp(coef(bestmodfit)[3:54]),
+     col="darkgreen",lwd=2,type='o',pch=16,xlab='Week',ylab='beta_u',
+     main="Transmission parameter, beta_u vs week")
+# This is the seasonal pattern of transmission in our best-fitted model
+
+# From here, you can estimate relationships between beta and various factors
+# (e.g., school terms, temperature, rain fall...). This is the advantage of 
+# TSIR, compared to ARIMA. 
+
+# What is the value of alpha?
+alpha <- coef(bestmodfit)[2]
+alpha # Close to 1, which suggests ... 
+```
+
+# 8. Where does the transmission rate ($\beta_u$) peak relative to the peak in the number of rotavirus cases (a) in 1991-92 (i.e. the first rotavirus season) and (b) 2005-2006 (i.e. the last rotavirus season)? What might explain the difference?
+
+## i. Identify the peak
+```{r}
+beta_u <- exp(coef(bestmodfit)[3:54])
+peak_beta_week <- which.max(beta_u)
+peak_beta_week   # 29
+```
+
+
+## ii. The relative positions of the peak in 1991–92 and 2005–06 with respect to the 29th week
+```{r}
+weeks_per_season <- 52
+n_seasons <- length(rota$rotaCA) / weeks_per_season  # 15
+
+# The first season: 1991–92
+idx_1991 <- 1:weeks_per_season
+
+# The last season: 2005–06
+idx_2005 <- ((n_seasons - 1) * weeks_per_season + 1):(n_seasons * weeks_per_season)
+
+# The week numbers within each season corresponding to the peak number of cases
+peak_case_week_1991 <- rota$week[idx_1991][which.max(rota$rotaCA[idx_1991])]
+peak_case_week_2005 <- rota$week[idx_2005][which.max(rota$rotaCA[idx_2005])]
+
+# The relative difference compared to the peak value of beta_u (in week 29)
+lag_1991 <- peak_case_week_1991 - peak_beta_week
+lag_2005 <- peak_case_week_2005 - peak_beta_week
+
+cat("The transmission rate peaks at:  Week", peak_beta_week, "\n")
+cat("1991-92 rotavirus cases peak at: Week", peak_case_week_1991,
+    " (lag =", lag_1991, "weeks)\n")
+cat("2005-06 rotavirus cases peak at: Week", peak_case_week_2005,
+    " (lag =", lag_2005, "weeks)\n")
+
+```
+
+```{r}
+# Plot 1991-92 season
+plot(rota$week[idx_1991], rota$rotaCA[idx_1991], type = "l",
+     xlab = "Week of season", ylab = "Reported cases",
+     main = "1991–92 season")
+abline(v = peak_beta_week, col = "red", lty = 2, lwd = 2)
+
+## Plot 2005-06 season
+plot(rota$week[idx_2005], rota$rotaCA[idx_2005], type = "l",
+     xlab = "Week of season", ylab = "Reported cases",
+     main = "2005–06 season")
+abline(v = peak_beta_week, col = "red", lty = 2, lwd = 2)
+```
+
+
+*Answer*:
+
+In the TSIR model, the transmission rate ($\beta_u$) peaks around Week 29.
+
+  - In 1991-92 (i.e. the first rotavirus season), the number of rotavirus cases peaks around Week 23, about 6 weeks before the transmission rate ($\beta_u$) peak.
+
+  - In 2005-2006 (i.e. the last rotavirus season), the number of rotavirus cases peaks around Week 31, about 2 weeks after the transmission rate ($\beta_u$) peak.
+
+
+
+The number of new infections at time $t+1$ is
+  $$I_{t+1} \propto \beta_tS_tI_t^\alpha$$
+  
+  - where $S_t$ and $I_t$ are the number of susceptible and infectious individuals, respectively, in the previous generation
+    
+  - $\beta_t$ is the transmission rate at time $t$
+
+  - $\alpha$ is a correction factor for non-homogeneous mixing
+    
+Since the case peak is determined by both the transmission rate $\beta_t$ and the number of susceptible ($S_t$), 
+
+  - if in a certain year, the number of susceptible ($S_t$) is high, once $\beta$ slightly increases, the number of infections ($I_t$) will rapidly surge, and the peak of cases will occur earlier than the peak of the transmission rate.
+  
+  - if in a certain year, the number of susceptible ($S_t$) is low, even if $\beta$  increases, the number of infections ($I_t$) is hard to increase, and the peak of cases will occur later than the peak of the transmission rate.
+  
+
+Therefore, the difference between the transmission rate peak relative to the peak in the number of rotavirus cases in 1991-92 and that in 2005-2006 might be caused by the fact that the prevalence of the disease in the past years led to a decrease in the number of susceptible individuals.
